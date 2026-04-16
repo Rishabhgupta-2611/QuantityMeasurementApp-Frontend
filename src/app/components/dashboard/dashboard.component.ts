@@ -1,0 +1,207 @@
+import { CommonModule } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
+import { ChangeDetectorRef, Component } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router } from '@angular/router';
+import { QuantityService } from '../../services/quantity.service';
+
+@Component({
+  selector: 'app-dashboard',
+  standalone: true,
+  imports: [CommonModule, FormsModule],
+  templateUrl: './dashboard.component.html',
+  styleUrls: ['./dashboard.component.css']
+})
+export class DashboardComponent {
+  selectedType = 'LENGTH';
+  selectedOperation = 'ADD';
+  units: string[] = ['FEET', 'INCHES', 'CENTIMETERS'];
+
+  input = {
+    thisQuantityDTO: {
+      value: 0,
+      unit: 'FEET',
+      measurementType: 'LENGTH'
+    },
+    thatQuantityDTO: {
+      value: 0,
+      unit: 'INCHES',
+      measurementType: 'LENGTH'
+    }
+  };
+
+  result: any = null;
+  historyList: any[] = [];
+  isLoggedIn = false;
+
+  constructor(
+    private service: QuantityService,
+    private cdr: ChangeDetectorRef,
+    private route: ActivatedRoute,
+    private router: Router
+  ) {}
+
+  onTypeChange() {
+    switch (this.selectedType) {
+      case 'LENGTH':
+        this.units = ['FEET', 'INCHES', 'CENTIMETERS', 'YARDS'];
+        break;
+      case 'WEIGHT':
+        this.units = ['KILOGRAM', 'GRAM', 'POUND'];
+        break;
+      case 'VOLUME':
+        this.units = ['LITRE', 'MILLILITRE', 'GALLON'];
+        break;
+      case 'TEMPERATURE':
+        this.units = ['CELSIUS', 'FAHRENHEIT'];
+        break;
+    }
+
+    this.input.thisQuantityDTO.measurementType = this.selectedType;
+    this.input.thatQuantityDTO.measurementType = this.selectedType;
+    this.input.thisQuantityDTO.unit = this.units[0];
+    this.input.thatQuantityDTO.unit = this.units[1] || this.units[0];
+
+    this.cdr.detectChanges();
+  }
+
+  calculate(op: string) {
+    this.historyList = [];
+    this.result = null;
+    this.cdr.detectChanges();
+
+    let apiCall;
+
+    switch (op) {
+      case 'ADD':
+        apiCall = this.service.add(this.input);
+        break;
+      case 'SUBTRACT':
+        apiCall = this.service.subtract(this.input);
+        break;
+      case 'COMPARE':
+        apiCall = this.service.compare(this.input);
+        break;
+      case 'CONVERT':
+        apiCall = this.service.convert(this.input);
+        break;
+      case 'DIVIDE':
+        apiCall = this.service.divide(this.input);
+        break;
+    }
+
+    apiCall?.subscribe({
+      next: (res: any) => {
+        if (op === 'COMPARE') {
+          this.result = res.resultValue == 1
+            ? 'Quantities Are Equal!'
+            : 'Quantities Are Not Equal!';
+        } else {
+          this.result = res;
+        }
+
+        this.cdr.detectChanges();
+      },
+      error: (err: HttpErrorResponse) => {
+        console.error(`${op} failed`, err);
+        this.result = this.buildErrorMessage(err, `${op} failed`);
+        this.cdr.detectChanges();
+      }
+    });
+  }
+
+  loadHistory() {
+    const token = localStorage.getItem('token');
+
+    if (!token) {
+      this.result = 'Please login first to view history';
+      this.historyList = [];
+      this.cdr.detectChanges();
+      return;
+    }
+
+    this.result = null;
+    this.historyList = [];
+
+    this.service.getHistory(this.selectedOperation).subscribe({
+      next: (res: any) => {
+        if (!res || res.length === 0) {
+          this.result = 'No history found';
+          this.historyList = [];
+        } else {
+          this.historyList = res;
+        }
+
+        this.cdr.detectChanges();
+      },
+      error: (err: HttpErrorResponse) => {
+        console.error('Error loading history:', err);
+        this.result = this.buildErrorMessage(err, 'Error loading history');
+        this.historyList = [];
+        this.cdr.detectChanges();
+      }
+    });
+  }
+
+  loadCount() {
+    this.historyList = [];
+    this.result = null;
+    this.cdr.detectChanges();
+
+    this.service.getCount(this.selectedOperation).subscribe({
+      next: (res) => {
+        this.result = `${this.selectedOperation} Count: ${res}`;
+        this.cdr.detectChanges();
+      },
+      error: (err: HttpErrorResponse) => {
+        this.result = this.buildErrorMessage(err, 'Error loading count');
+        this.cdr.detectChanges();
+      }
+    });
+  }
+
+  selectType(type: string) {
+    this.selectedType = type;
+    this.result = null;
+    this.historyList = [];
+    this.onTypeChange();
+    this.cdr.detectChanges();
+  }
+
+  logout() {
+    localStorage.removeItem('token');
+    this.isLoggedIn = false;
+    window.location.href = '/login';
+  }
+
+  ngOnInit() {
+    const token = this.route.snapshot.queryParamMap.get('token');
+
+    if (token) {
+      localStorage.setItem('token', token);
+      this.router.navigate([], {
+        queryParams: {},
+        replaceUrl: true
+      });
+    }
+
+    this.isLoggedIn = !!localStorage.getItem('token');
+  }
+
+  goToLogin() {
+    this.router.navigate(['/login']);
+  }
+
+  private buildErrorMessage(err: HttpErrorResponse, fallback: string): string {
+    if (err.status === 0) {
+      return 'Server not reachable';
+    }
+
+    const serverMessage =
+      typeof err.error === 'string'
+        ? err.error
+        : err.error?.message || err.message;
+
+    return `${fallback}: ${serverMessage || `HTTP ${err.status}`}`;
+  }
+}
